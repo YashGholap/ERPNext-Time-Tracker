@@ -23,6 +23,7 @@
     "@fontsource/inter": "^5.2.6",
     "@tailwindcss/vite": "^4.1.12",
     "axios": "^1.11.0",
+    "electron-store": "^10.1.0",
     "lucide-vue-next": "^0.542.0",
     "tailwindcss": "^4.1.12"
   },

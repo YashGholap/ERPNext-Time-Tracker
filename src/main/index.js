@@ -1,7 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import axios from 'axios'
 import icon from '../../resources/icon.png?asset'
+
+import pkg from 'electron-store'
+const Store = pkg.default
+const store = new Store()
 
 function createWindow() {
   // Create the browser window.
@@ -34,6 +39,43 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 }
+
+
+//implementing Login
+ipcMain.handle('login', async (_, { serverUrl, username, password }) => {
+  try {
+    const response = await axios.post(`${serverUrl}/api/method/login`, {
+      usr: username,
+      pwd: password
+    })
+
+    const sid = response.headers["set-cookie"]
+      ?.find(cookie => cookie.startsWith("sid="))
+      ?.split(";")[0]
+      ?.replace("sid=", "")
+
+    if (sid) {
+      store.set("sid", sid)
+    }
+
+    return { success: true, sid }
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+})
+
+//setup IPC for sid
+ipcMain.on('set-sid', (_, newSid) => {
+  store.set('sid', newSid)
+})
+
+ipcMain.handle('get-sid', () => {
+  return store.get('sid') || null
+})
+
+ipcMain.on('clear-sid', () => {
+  store.delete('sid')
+})
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
