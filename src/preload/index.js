@@ -3,10 +3,14 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 // Custom APIs for renderer
 const api = {
-  setSid: (newSid) => ipcRenderer.send('set-sid', newSid),
-  getSid: () => ipcRenderer.invoke('get-sid'),
-  clearSid: () => ipcRenderer.send('clear-sid'),
-  login: (serverUrl, username, password) => ipcRenderer.invoke('login', { serverUrl, username, password })
+  saveCredentials: (serverUrl, apiKey, apiSecret) =>
+    ipcRenderer.send('save-api-credentials', { serverUrl, apiKey, apiSecret }),
+
+  getCredentials: () => ipcRenderer.invoke('get-api-credentials'),
+
+  clearCredentials: () => ipcRenderer.send('clear-api-credentials'),
+
+  fetchAPI: (endpoint, options = {}) => ipcRenderer.invoke('fetch-api', { endpoint, options })
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

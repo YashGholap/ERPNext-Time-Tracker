@@ -25,7 +25,8 @@
     "axios": "^1.11.0",
     "electron-store": "^10.1.0",
     "lucide-vue-next": "^0.542.0",
-    "tailwindcss": "^4.1.12"
+    "tailwindcss": "^4.1.12",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config": "^2.0.0",

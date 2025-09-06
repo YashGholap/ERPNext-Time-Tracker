@@ -1,7 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import axios from 'axios'
 import icon from '../../resources/icon.png?asset'
 
 import pkg from 'electron-store'
@@ -41,40 +40,54 @@ function createWindow() {
 }
 
 
-//implementing Login
-ipcMain.handle('login', async (_, { serverUrl, username, password }) => {
-  try {
-    const response = await axios.post(`${serverUrl}/api/method/login`, {
-      usr: username,
-      pwd: password
-    })
+// Save API credentials
+ipcMain.on('save-api-credentials', (_, { serverUrl, apiKey, apiSecret }) => {
+  store.set('apiCreds', { serverUrl, apiKey, apiSecret })
+})
 
-    const sid = response.headers["set-cookie"]
-      ?.find(cookie => cookie.startsWith("sid="))
-      ?.split(";")[0]
-      ?.replace("sid=", "")
+// Get API credentials
+ipcMain.handle('get-api-credentials', () => {
+  return store.get('apiCreds') || null
+})
 
-    if (sid) {
-      store.set("sid", sid)
+// Clear credentials
+ipcMain.on('clear-api-credentials', () => {
+  store.delete('apiCreds')
+})
+
+// Helper to make authenticated requests
+ipcMain.handle('fetch-api', async (_, { endpoint, options = {} }) => {
+  const creds = store.get('apiCreds')
+  if (!creds) throw new Error('API credentials not set')
+
+  options.headers = options.headers || {}
+  options.headers['Authorization'] = `token ${creds.apiKey}:${creds.apiSecret}` // use Bearer
+
+  const axios = await import('axios').then(m => m.default)
+
+  // Ensure serverUrl includes protocol
+  const baseUrl = creds.serverUrl.startsWith('http')
+    ? creds.serverUrl
+    : `http://${creds.serverUrl}`
+    
+       // Safety check 
+    if (typeof endpoint !== 'string') {
+      console.error('[fetch-api] Invalid endpoint:', endpoint)
+      throw new Error('Endpoint must be a string')
     }
+  const url = `${baseUrl}${endpoint}`
 
-    return { success: true, sid }
-  } catch (error) {
-    return { success: false, error: error.message }
+    console.log('[fetch-api] URL being called:', url)
+    // console.log('[fetch-api] Headers:', options.headers)
+
+
+
+  try {
+    const res = await axios({ url, ...options })
+    return res.data
+  } catch (err) {
+    throw err.response?.data || err.message
   }
-})
-
-//setup IPC for sid
-ipcMain.on('set-sid', (_, newSid) => {
-  store.set('sid', newSid)
-})
-
-ipcMain.handle('get-sid', () => {
-  return store.get('sid') || null
-})
-
-ipcMain.on('clear-sid', () => {
-  store.delete('sid')
 })
 
 // This method will be called when Electron has finished
