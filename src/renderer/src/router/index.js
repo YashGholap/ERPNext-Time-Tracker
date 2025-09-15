@@ -1,12 +1,15 @@
 import { createRouter, createWebHashHistory } from "vue-router"
 import Settings from '../components/pages/Settings.vue'
 import Dashboard from '../components/pages/Dashboard.vue'
+import TimerPage from "../components/pages/TimerPage.vue"
+
 
 const routes = [
       { path: "/", redirect: "/initial" }, // temporary redirect
     { path: "/initial", name: "Initial" }, // used only for initial check
     {path:"/settings",name: "Settings", component:Settings},
-    {path:"/dashboard",name: "Dashboard",  component:Dashboard}
+    {path:"/dashboard",name: "Dashboard",  component:Dashboard},
+    {path:"/timer",name: "TimerPage",  component: TimerPage}, // lazy-loaded
 ]
 
 const router = createRouter({

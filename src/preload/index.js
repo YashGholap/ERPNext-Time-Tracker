@@ -10,7 +10,12 @@ const api = {
 
   clearCredentials: () => ipcRenderer.send('clear-api-credentials'),
 
-  fetchAPI: (endpoint, options = {}) => ipcRenderer.invoke('fetch-api', { endpoint, options })
+  fetchAPI: (endpoint, options = {}) => ipcRenderer.invoke('fetch-api', { endpoint, options }),
+
+  // Screenshot
+  takeScreenshot: () => ipcRenderer.invoke('take-screenshot'),
+  getScreenshots: () => ipcRenderer.invoke('get-screenshots'),
+  clearScreenshots: () => ipcRenderer.invoke('clear-screenshots')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to

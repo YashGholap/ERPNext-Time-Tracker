@@ -107,7 +107,7 @@ const fetchTimesheets = async (taskName) => {
 
   try {
     const res = await window.api.fetchAPI(
-      `/api/resource/Timesheet?fields=["name","docstatus"]&filters=[["docstatus","=","0"],["time_logs","task","=","${taskName}"]]`
+      `/api/v2/method/time_tracker.time_tracker.api.get_timesheets?project=${encodeURIComponent(selectedProject.value)}&task=${encodeURIComponent(taskName)}`
     )
     timesheets.value = extractArrayFromResponse(res)
   } catch (err) {
@@ -131,12 +131,8 @@ watch(selectedTask, (newTask) => {
 })
 
 // Handle Start Timer
-const startTimer = () => {
-  console.log("=== Timer Started ===")
-  console.log("Project:", selectedProject.value)
-  console.log("Task:", selectedTask.value)
-  console.log("Timesheet:", selectedTimesheet.value)
-  console.log("Activity Name:", activityName.value)
+const goToTimerPage = () => {
+  router.push('/timer')   // route name/path for TimerPage.vue
 }
 </script>
 
@@ -196,24 +192,14 @@ const startTimer = () => {
         </select>
       </div>
 
-      <!-- Activity Name -->
-      <div>
-        <label class="block mb-1 text-sm font-medium text-gray-700">Activity Name</label>
-        <input
-          type="text"
-          v-model="activityName"
-          placeholder="Enter activity name"
-          class="w-full border rounded px-3 py-2 text-gray-800 focus:ring-2 focus:ring-black focus:outline-none"
-        />
-      </div>
 
       <!-- Start Timer Button (centered) -->
       <div class="flex justify-center pt-4">
         <button
-          @click="startTimer"
+          @click="goToTimerPage"
           class="bg-black text-white px-6 py-2 rounded hover:bg-gray-800 focus:ring-2 focus:ring-gray-700 focus:outline-none"
         >
-          Start Timer
+          Track Time
         </button>
       </div>
     </div>

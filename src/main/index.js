@@ -3,6 +3,11 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
+import fs from 'fs'
+import path from 'path'
+import { desktopCapturer } from 'electron'
+
+
 import pkg from 'electron-store'
 const Store = pkg.default
 const store = new Store()
@@ -89,6 +94,58 @@ ipcMain.handle('fetch-api', async (_, { endpoint, options = {} }) => {
     throw err.response?.data || err.message
   }
 })
+
+ipcMain.handle('take-screenshot', async () => {
+  try {
+    const sources = await desktopCapturer.getSources({ types: ['screen'] });
+    const screenSource = sources[0];
+    const imageBuffer = screenSource.thumbnail.toPNG();
+
+    // Save file (optional, can be used to send to ERPNext)
+    const screenshotsDir = path.join(app.getPath('userData'), 'screenshots');
+    if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filePath = path.join(screenshotsDir, `screenshot_${timestamp}.png`);
+    fs.writeFileSync(filePath, imageBuffer);
+
+    // Return as base64 for renderer
+    return `data:image/png;base64,${imageBuffer.toString('base64')}`;
+  } catch (err) {
+    console.error('Screenshot error:', err);
+    return null;
+  }
+});
+
+ipcMain.handle('get-screenshots', async () => {
+  const screenshotsDir = path.join(app.getPath('userData'), 'screenshots');
+  if (!fs.existsSync(screenshotsDir)) return [];
+
+  const files = fs.readdirSync(screenshotsDir)
+    .filter(f => f.endsWith('.png'))
+    .sort((a, b) => fs.statSync(path.join(screenshotsDir, b)).mtimeMs - fs.statSync(path.join(screenshotsDir, a)).mtimeMs)
+    .slice(0, 3); // latest 3
+
+  // Return both thumbnail (small) and full image
+  return files.map(f => {
+    const fullPath = path.join(screenshotsDir, f);
+    const fullData = fs.readFileSync(fullPath, { encoding: 'base64' });
+    return {
+      thumbnail: `data:image/png;base64,${fullData}`, // we can later resize for thumbnail if needed
+      filePath: `data:image/png;base64,${fullData}`, // full image for modal
+    };
+  });
+});
+
+ipcMain.handle('clear-screenshots', () => {
+  const screenshotsDir = path.join(app.getPath('userData'), 'screenshots')
+  if (fs.existsSync(screenshotsDir)) {
+    fs.readdirSync(screenshotsDir).forEach(f => {
+      fs.unlinkSync(path.join(screenshotsDir, f))
+    })
+  }
+})
+
+
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
