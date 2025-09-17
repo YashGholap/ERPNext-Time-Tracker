@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { UserRoundCog } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -11,7 +11,7 @@ const timesheets = ref([])
 const selectedProject = ref('')
 const selectedTask = ref('')
 const selectedTimesheet = ref('')
-const activityName = ref('')
+// activityName moved to Timer Page - not needed here
 
 // Navigation to Settings
 const goToSettings = () => router.push('/settings')
@@ -19,25 +19,18 @@ const goToSettings = () => router.push('/settings')
 // --- Helpers to extract data safely from various API response shapes ---
 const extractArrayFromResponse = (res) => {
   if (!res) return []
-  // If the response itself is an array
   if (Array.isArray(res)) return res
-  // Common shapes
   if (Array.isArray(res.data)) return res.data
   if (Array.isArray(res.message)) return res.message
-  // Defensive: nested .data.data (some wrappers)
   if (res.data && Array.isArray(res.data.data)) return res.data.data
   if (res.message && Array.isArray(res.message.data)) return res.message.data
-  // If server returned an object with keys that look like a list (rare)
   return []
 }
 
 const extractUserFromResponse = (res) => {
   if (!res) return 'User'
-  // plain string
   if (typeof res === 'string') return res
-  // message as string
   if (typeof res.message === 'string') return res.message
-  // message as array
   if (Array.isArray(res.message) && res.message.length) {
     const first = res.message[0]
     if (typeof first === 'string') return first
@@ -45,9 +38,7 @@ const extractUserFromResponse = (res) => {
     if (first?.name) return first.name
     return JSON.stringify(first)
   }
-  // data as string
   if (typeof res.data === 'string') return res.data
-  // data as array
   if (Array.isArray(res.data) && res.data.length) {
     const first = res.data[0]
     if (typeof first === 'string') return first
@@ -118,7 +109,6 @@ const fetchTimesheets = async (taskName) => {
 // Watch project changes → fetch tasks
 watch(selectedProject, (newProject) => {
   fetchTasks(newProject)
-  // tasks.value = []
   selectedTask.value = ''
   timesheets.value = []
   selectedTimesheet.value = ''
@@ -130,12 +120,26 @@ watch(selectedTask, (newTask) => {
   selectedTimesheet.value = ''
 })
 
-// Handle Start Timer
-const goToTimerPage = () => {
-  router.push('/timer')   // route name/path for TimerPage.vue
+// computed: allow tracking only when all three are selected
+const canTrack = computed(() => {
+  return selectedProject.value && selectedTask.value && selectedTimesheet.value
+})
+
+// Handle Start Timer (clear screenshots then navigate)
+const goToTimerPage = async () => {
+  if (!canTrack.value) return
+  try {
+    // Clear screenshots folder via main process so TimerPage starts fresh
+    if (window.api?.clearScreenshots) {
+      await window.api.clearScreenshots()
+    }
+  } catch (err) {
+    console.error('Failed to clear screenshots before navigation:', err)
+  } finally {
+    router.push('/timer')
+  }
 }
 </script>
-
 
 <template>
   <div class="min-h-screen bg-gray-100 font-sans">
@@ -192,12 +196,15 @@ const goToTimerPage = () => {
         </select>
       </div>
 
-
       <!-- Start Timer Button (centered) -->
       <div class="flex justify-center pt-4">
         <button
           @click="goToTimerPage"
-          class="bg-black text-white px-6 py-2 rounded hover:bg-gray-800 focus:ring-2 focus:ring-gray-700 focus:outline-none"
+          :disabled="!canTrack"
+          :class="[
+            'px-6 py-2 rounded focus:ring-2 focus:ring-gray-700 focus:outline-none',
+            canTrack ? 'bg-black text-white hover:bg-gray-800' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+          ]"
         >
           Track Time
         </button>

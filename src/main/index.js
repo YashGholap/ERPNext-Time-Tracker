@@ -1,11 +1,10 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, desktopCapturer, nativeImage, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 import fs from 'fs'
 import path from 'path'
-import { desktopCapturer } from 'electron'
 
 
 import pkg from 'electron-store'
@@ -95,53 +94,107 @@ ipcMain.handle('fetch-api', async (_, { endpoint, options = {} }) => {
   }
 })
 
+// ensure screenshots dir exists
+const screenshotsDir = path.join(app.getPath('userData'), 'screenshots')
+if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir, { recursive: true })
+
+// TAKE A NEW SCREENSHOT (capture at full resolution, save, return data URLs)
 ipcMain.handle('take-screenshot', async () => {
   try {
-    const sources = await desktopCapturer.getSources({ types: ['screen'] });
-    const screenSource = sources[0];
-    const imageBuffer = screenSource.thumbnail.toPNG();
+    // Determine primary display size and scale factor
+    const disp = screen.getPrimaryDisplay()
+    const { width: displayW, height: displayH } = disp.size
+    const scale = disp.scaleFactor || 1
 
-    // Save file (optional, can be used to send to ERPNext)
-    const screenshotsDir = path.join(app.getPath('userData'), 'screenshots');
-    if (!fs.existsSync(screenshotsDir)) fs.mkdirSync(screenshotsDir);
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filePath = path.join(screenshotsDir, `screenshot_${timestamp}.png`);
-    fs.writeFileSync(filePath, imageBuffer);
-
-    // Return as base64 for renderer
-    return `data:image/png;base64,${imageBuffer.toString('base64')}`;
-  } catch (err) {
-    console.error('Screenshot error:', err);
-    return null;
-  }
-});
-
-ipcMain.handle('get-screenshots', async () => {
-  const screenshotsDir = path.join(app.getPath('userData'), 'screenshots');
-  if (!fs.existsSync(screenshotsDir)) return [];
-
-  const files = fs.readdirSync(screenshotsDir)
-    .filter(f => f.endsWith('.png'))
-    .sort((a, b) => fs.statSync(path.join(screenshotsDir, b)).mtimeMs - fs.statSync(path.join(screenshotsDir, a)).mtimeMs)
-    .slice(0, 3); // latest 3
-
-  // Return both thumbnail (small) and full image
-  return files.map(f => {
-    const fullPath = path.join(screenshotsDir, f);
-    const fullData = fs.readFileSync(fullPath, { encoding: 'base64' });
-    return {
-      thumbnail: `data:image/png;base64,${fullData}`, // we can later resize for thumbnail if needed
-      filePath: `data:image/png;base64,${fullData}`, // full image for modal
-    };
-  });
-});
-
-ipcMain.handle('clear-screenshots', () => {
-  const screenshotsDir = path.join(app.getPath('userData'), 'screenshots')
-  if (fs.existsSync(screenshotsDir)) {
-    fs.readdirSync(screenshotsDir).forEach(f => {
-      fs.unlinkSync(path.join(screenshotsDir, f))
+    // Ask desktopCapturer for a large thumbnail (use display size * scale)
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: Math.round(displayW * scale), height: Math.round(displayH * scale) }
     })
+
+    if (!sources || !sources.length) return null
+    const screenSource = sources[0]
+
+    // screenSource.thumbnail is a nativeImage at requested size
+    const fullBuffer = screenSource.thumbnail.toPNG() // full-resolution buffer
+
+    // Save file with timestamp (optional persistence)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `screenshot_${timestamp}.png`
+    const filePath = path.join(screenshotsDir, filename)
+    fs.writeFileSync(filePath, fullBuffer)
+
+    // Create nativeImage from buffer to produce data URLs and resized thumbnail
+    const fullNative = nativeImage.createFromBuffer(fullBuffer)
+
+    // Create thumbnail (width ~ 600 px, keep aspect)
+    const THUMB_W = 600
+    const thumbNative = fullNative.resize({ width: THUMB_W })
+
+    const fullDataUrl = fullNative.toDataURL()
+    const thumbDataUrl = thumbNative.toDataURL()
+
+    // Return object for immediate addition to UI (you can also return filePath if needed)
+    return {
+      thumbnail: thumbDataUrl,
+      fullData: fullDataUrl,
+      fileSaved: filePath
+    }
+  } catch (err) {
+    console.error('take-screenshot error', err)
+    return null
+  }
+})
+
+// GET latest screenshots from folder as data URLs (thumbnail + full) - latest 3
+ipcMain.handle('get-screenshots', async () => {
+  try {
+    if (!fs.existsSync(screenshotsDir)) return []
+
+    const files = fs.readdirSync(screenshotsDir)
+      .filter(f => f.endsWith('.png'))
+      .map(f => ({
+        name: f,
+        mtime: fs.statSync(path.join(screenshotsDir, f)).mtimeMs
+      }))
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, 3) // latest 3
+
+    const results = files.map(({ name }) => {
+      const fullPath = path.join(screenshotsDir, name)
+      const buffer = fs.readFileSync(fullPath)
+      const native = nativeImage.createFromBuffer(buffer)
+
+      // Produce a medium-sized thumbnail for the grid (width 600 -> adjust as you like)
+      const thumbNative = native.resize({ width: 600 })
+
+      return {
+        thumbnail: thumbNative.toDataURL(),
+        fullData: native.toDataURL(),
+        fileSaved: fullPath,
+        name
+      }
+    })
+
+    return results
+  } catch (err) {
+    console.error('get-screenshots error', err)
+    return []
+  }
+})
+
+// Optional: clear screenshots folder
+ipcMain.handle('clear-screenshots', async () => {
+  try {
+    if (!fs.existsSync(screenshotsDir)) return true
+    const files = fs.readdirSync(screenshotsDir)
+    for (const f of files) {
+      try { fs.unlinkSync(path.join(screenshotsDir, f)) } catch (_) {}
+    }
+    return true
+  } catch (err) {
+    console.error('clear-screenshots error', err)
+    return false
   }
 })
 
