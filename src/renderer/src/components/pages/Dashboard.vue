@@ -136,7 +136,14 @@ const goToTimerPage = async () => {
   } catch (err) {
     console.error('Failed to clear screenshots before navigation:', err)
   } finally {
-    router.push('/timer')
+    router.push({
+      path: '/timer',
+      query:{
+          project: selectedProject.value,
+          task: selectedTask.value,
+          timesheet: selectedTimesheet.value
+      }
+    });
   }
 }
 </script>

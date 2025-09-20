@@ -1,11 +1,17 @@
 <template>
-  <div class="min-h-screen p-6 bg-white">
+  <div class="min-h-screen p-6 bg-white relative">
     <!-- Header with Back button -->
     <div class="flex items-center justify-between mb-6">
       <div class="flex items-center gap-3">
         <button
           @click="onBack"
-          class="flex items-center gap-2 px-3 py-2 rounded bg-black text-white hover:bg-gray-800 transition"
+          :disabled="isUploading || elapsedSeconds !== 0"
+          :class="[
+            'flex items-center gap-2 px-3 py-2 rounded transition',
+            (isUploading || elapsedSeconds !== 0)
+              ? 'bg-gray-300 text-gray-600 cursor-not-allowed'
+              : 'bg-black text-white hover:bg-gray-800'
+          ]"
         >
           <ChevronLeft class="w-4 h-4" />
           Back
@@ -24,7 +30,7 @@
         <input
           v-model="activityName"
           type="text"
-          :disabled="isTracking"
+          :disabled="isTracking || isUploading"
           class="w-full border rounded p-2 focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-200"
           placeholder="Enter activity name"
         />
@@ -45,7 +51,7 @@
       <div class="flex gap-6 mb-10">
         <button
           @click="toggleTracking"
-          :disabled="!activityName || (!isTracking && elapsedSeconds > 0)"
+          :disabled="!activityName || (!isTracking && elapsedSeconds > 0) || isUploading"
           class="px-6 py-3 rounded bg-black text-white shadow flex items-center gap-2 hover:bg-gray-800 transition disabled:opacity-50"
         >
           <component :is="isTracking ? Square : Play" class="w-5 h-5" />
@@ -54,7 +60,7 @@
 
         <button
           @click="toggleBreak"
-          :disabled="!isTracking"
+          :disabled="!isTracking || isUploading"
           class="px-6 py-3 rounded bg-black text-white shadow flex items-center gap-2 hover:bg-gray-800 transition disabled:opacity-50"
         >
           <Coffee class="w-5 h-5" />
@@ -63,7 +69,7 @@
 
         <button
           @click="resetTimer"
-          :disabled="isTracking || elapsedSeconds === 0"
+          :disabled="isTracking || elapsedSeconds === 0 || isUploading"
           class="px-6 py-3 rounded bg-black text-white shadow flex items-center gap-2 hover:bg-gray-800 transition disabled:opacity-50"
         >
           <RotateCcw class="w-5 h-5" />
@@ -77,7 +83,7 @@
         <div class="grid grid-cols-3 gap-4">
           <div
             v-for="(screenshot, index) in screenshots"
-            :key="index"
+            :key="screenshot.name || index"
             class="border rounded shadow p-2 cursor-pointer hover:scale-105 transition"
             @click="openModal(screenshot.fullData)"
           >
@@ -130,15 +136,45 @@
         </div>
       </div>
     </div>
+
+    <!-- Upload overlay (loader) -->
+    <div
+      v-if="isUploading"
+      class="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-40"
+    >
+      <div class="bg-white rounded p-6 flex flex-col items-center gap-4 shadow-lg">
+        <div class="loader w-12 h-12"></div>
+        <div class="text-lg font-medium">Uploading timesheet and screenshots...</div>
+        <div class="text-sm text-gray-600">Please wait — do not close the app.</div>
+      </div>
+    </div>
+
+    <!-- Toasts -->
+    <div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
+      <div
+        v-if="uploadStatus === 'success'"
+        class="bg-green-600 text-white px-4 py-2 rounded shadow"
+      >
+        Upload succeeded.
+      </div>
+
+      <div v-if="uploadStatus === 'failed'" class="bg-red-600 text-white px-4 py-2 rounded shadow flex items-center gap-3">
+        <div>Upload failed: {{ uploadErrorMessage }}</div>
+        <div class="ml-3">
+          <button @click="retryUpload" class="px-3 py-1 bg-white text-black rounded shadow">Retry</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { Play, Square, Coffee, RotateCcw, ChevronLeft } from "lucide-vue-next";
 
 const router = useRouter();
+const route = useRoute();
 
 // state
 const activityName = ref("");
@@ -149,8 +185,10 @@ const elapsedSeconds = ref(0);
 const screenshots = ref([]);
 let screenshotTimeout = null;
 const interval = ref(null);
+let startTimestamp = null;
+let stopTimestamp = null;
 
-// modal
+// modal + zoom
 const modalVisible = ref(false);
 const modalImage = ref(null);
 const zoom = ref(1);
@@ -169,47 +207,188 @@ const formattedTime = computed(() => {
   return `${minutes}:${seconds}`;
 });
 
+// upload state & retry
+const isUploading = ref(false);
+const uploadStatus = ref("idle"); // 'idle' | 'uploading' | 'success' | 'failed'
+const uploadErrorMessage = ref("");
+let lastUploadPayload = null;
+
+// helper: format Date to Frappe datetime "YYYY-MM-DD HH:mm:ss" in local timezone
+function toFrappeDatetime(d) {
+  if (!d) return null;
+  const Y = d.getFullYear();
+  const M = String(d.getMonth() + 1).padStart(2, "0");
+  const D = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+
 // ------------ Navigation ------------
 function onBack() {
-  if (isTracking.value) {
-    const confirmed = window.confirm("Timer is running — stop and go back?");
-    if (!confirmed) return;
-    stopTimer();
+  // enforce "only allowed when time is 00:00"
+  if (isUploading.value) return; // extra safety
+  if (elapsedSeconds.value !== 0) {
+    window.alert("Please reset the timer to 00:00 before going back to the dashboard.");
+    return;
   }
   router.push("/dashboard");
 }
 
 // ------------ Timer controls ------------
 function toggleTracking() {
-  if (isTracking.value) stopTimer();
-  else startTimer();
+  if (isTracking.value) {
+    stopAndUpload();
+  } else {
+    startTimer();
+  }
 }
 
-async function startTimer() {
-  // If starting for a new activity => update lastStartedActivity (clearing happened on Dashboard)
-  try {
-    const isNewActivity = (activityName.value.trim() !== lastStartedActivity.value.trim());
-    if (isNewActivity) {
-      lastStartedActivity.value = activityName.value.trim();
-      // UI and folder already cleared by Dashboard before navigation, and Timer's onMounted clears as well
-      // so we don't take an immediate screenshot — scheduled screenshots will run after random delay
-    }
-  } catch (err) {
-    console.error("Error while preparing new activity:", err);
-  }
+function startTimer() {
+  // prevent restarting from stopped time — require reset
+  if (elapsedSeconds.value > 0) return;
 
+  // mark start
+  startTimestamp = new Date();
   isTracking.value = true;
+  isOnBreak.value = false;
   interval.value = setInterval(() => {
     if (!isOnBreak.value) elapsedSeconds.value++;
   }, 1000);
 
   scheduleNextScreenshot();
+  // load screenshots (should be empty usually)
+  loadScreenshots();
 }
 
 function stopTimer() {
   isTracking.value = false;
   clearInterval(interval.value);
   clearTimeout(screenshotTimeout);
+  stopTimestamp = new Date();
+}
+
+// stop + upload flow
+async function stopAndUpload() {
+  // set stop time and stop capturing further screenshots immediately
+  stopTimestamp = new Date();
+  isTracking.value = false;
+  clearInterval(interval.value);
+  clearTimeout(screenshotTimeout);
+
+  // gather route query params for timesheet/task/project
+  const taskName = route.query.task || route.query.task_name || "";
+  const timesheetName = route.query.timesheet || route.query.timesheet_name || "";
+  const projectName = route.query.project || route.query.project_name || "";
+
+  // prepare payload
+  const payload = {
+    timesheet_name: timesheetName,
+    task_name: taskName,
+    project_name: projectName,
+    activity_name: activityName.value || "",
+    from_time: toFrappeDatetime(startTimestamp),
+    to_time: toFrappeDatetime(stopTimestamp),
+    screenshots: []
+  };
+
+  // fetch screenshots from main
+  try {
+    const files = await window.api.getScreenshots(); // expects [{ name, fullData, ... }]
+    if (Array.isArray(files)) {
+      for (const f of files) {
+        const name = f.name || f.fileSaved || `screenshot-${Date.now()}.png`;
+        let data = f.fullData || f.filePath || ""; // fullData is expected to be data URL
+        if (!data) continue;
+        const commaIndex = data.indexOf(",");
+        if (commaIndex !== -1) data = data.slice(commaIndex + 1);
+        payload.screenshots.push({ filename: name, data });
+      }
+    }
+  } catch (err) {
+    console.error("Failed to read screenshots before upload:", err);
+    // continue with empty screenshots
+  }
+
+  // store last payload for retry
+  lastUploadPayload = payload;
+
+  // perform upload
+  await performUpload(payload);
+}
+
+// core upload function (handles state)
+async function performUpload(payload) {
+  isUploading.value = true;
+  uploadStatus.value = "uploading";
+  uploadErrorMessage.value = "";
+
+  try {
+    // Frappe RPC handler expects a named parameter `data`.
+    // Wrap our JSON payload into an URL-encoded form field named `data`.
+    const body = new URLSearchParams();
+    body.append("data", JSON.stringify(payload));
+
+    const res = await window.api.fetchAPI(
+      "/api/method/time_tracker.time_tracker.api.save_timesheet_with_screenshots",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        // ipcMain fetch-api forwards this to axios, which will send the body string
+        data: body.toString(),
+      }
+    );
+
+    // Consider response a success if we got here without throwing
+    uploadStatus.value = "success";
+
+    // clear screenshots on success (best-effort)
+    try {
+      if (window.api.clearScreenshots) {
+        await window.api.clearScreenshots();
+      }
+    } catch (err) {
+      console.error("Failed to clear screenshots after upload:", err);
+    } finally {
+      screenshots.value = [];
+    }
+
+    // mark upload finished
+    isUploading.value = false;
+
+    // briefly show success then reset status
+    setTimeout(() => {
+      uploadStatus.value = "idle";
+    }, 2500);
+
+    return res;
+  } catch (err) {
+    // extract a friendly message from various possible error shapes
+    let message = "";
+    if (!err) message = "Unknown error";
+    else if (typeof err === "string") message = err;
+    else if (err.exception) message = err.exception;
+    else if (err.message) message = err.message;
+    else if (err.error) message = err.error;
+    else message = JSON.stringify(err);
+
+    console.error("Upload failed:", err);
+    uploadStatus.value = "failed";
+    uploadErrorMessage.value = message;
+    isUploading.value = false;
+
+    // keep lastUploadPayload for retry (handled elsewhere)
+    throw err; // rethrow if caller wants to handle
+  }
+}
+
+// retry uses lastUploadPayload
+async function retryUpload() {
+  if (!lastUploadPayload) return;
+  await performUpload(lastUploadPayload);
 }
 
 function toggleBreak() {
@@ -220,11 +399,13 @@ function toggleBreak() {
 }
 
 function resetTimer() {
-  if (isTracking.value) return;
+  if (isTracking.value || isUploading.value) return;
   clearInterval(interval.value);
   clearTimeout(screenshotTimeout);
   elapsedSeconds.value = 0;
   isOnBreak.value = false;
+  startTimestamp = null;
+  stopTimestamp = null;
 }
 
 // ------------ Screenshot functions ------------
@@ -249,8 +430,8 @@ async function loadScreenshots() {
 // schedule random 8-12 minutes
 function scheduleNextScreenshot() {
   if (!isTracking.value || isOnBreak.value) return;
-  const min = 1 * 60 * 1000;
-  const max = 2 * 60 * 1000;
+  const min =  60 * 1000;
+  const max = 1 * 60 * 1000;
   const randomDelay = Math.floor(Math.random() * (max - min + 1)) + min;
   screenshotTimeout = setTimeout(async () => {
     if (isTracking.value && !isOnBreak.value) {
@@ -366,5 +547,16 @@ img[draggable="false"] {
   -webkit-user-drag: none;
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* loader */
+.loader {
+  border: 4px solid rgba(0,0,0,0.08);
+  border-left-color: #111827;
+  border-radius: 9999px;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>
