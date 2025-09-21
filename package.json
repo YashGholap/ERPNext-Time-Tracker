@@ -26,6 +26,7 @@
     "electron-store": "^10.1.0",
     "lucide-vue-next": "^0.542.0",
     "tailwindcss": "^4.1.12",
+    "uuid": "^13.0.0",
     "vue-router": "^4.5.1"
   },
   "devDependencies": {

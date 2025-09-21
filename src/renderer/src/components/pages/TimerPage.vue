@@ -17,9 +17,7 @@
           Back
         </button>
       </div>
-
       <h1 class="text-2xl font-bold">Time Tracker</h1>
-
       <div style="width: 86px;"></div>
     </div>
 
@@ -68,7 +66,7 @@
         </button>
 
         <button
-          @click="resetTimer"
+          @click="resetAndCleanup"
           :disabled="isTracking || elapsedSeconds === 0 || isUploading"
           class="px-6 py-3 rounded bg-black text-white shadow flex items-center gap-2 hover:bg-gray-800 transition disabled:opacity-50"
         >
@@ -94,19 +92,24 @@
             />
           </div>
         </div>
+
+        <!-- Go to Timesheet button -->
+        <div class="w-full flex justify-center mt-4">
+          <button
+            v-if="showTimesheetLink && timesheetUrl"
+            @click="goToTimesheet"
+            class="px-6 py-3 bg-black text-white rounded shadow flex items-center gap-2 hover:bg-gray-800 transition"
+          >
+            Go to Timesheet
+          </button>
+        </div>
       </div>
 
-      <!-- Modal for full screenshot with zoom + pan controls -->
+      <!-- Modal -->
       <div v-if="modalVisible" class="fixed inset-0 z-50 flex items-center justify-center">
         <div class="absolute inset-0 bg-black bg-opacity-80" @click="closeModal"></div>
-
         <div
           class="relative z-10 bg-transparent p-4 rounded max-w-[96vw] max-h-[96vh] flex flex-col items-center"
-          @pointerdown.capture="onPointerDown"
-          @pointermove.capture="onPointerMove"
-          @pointerup.capture="onPointerUp"
-          @pointercancel.capture="onPointerUp"
-          @wheel.prevent="onWheelZoom"
         >
           <div class="mb-2 flex items-center gap-2">
             <button @click.stop="zoomOut" class="px-3 py-1 bg-white text-black rounded shadow">−</button>
@@ -116,32 +119,23 @@
             <div class="ml-3 text-white select-none">Zoom: {{ Math.round(zoom * 100) }}%</div>
             <button @click.stop="closeModal" class="ml-4 px-3 py-1 bg-red-600 text-white rounded shadow">Close</button>
           </div>
-
           <div
-            ref="viewport"
-            class="relative bg-black flex items-center justify-center overflow-hidden rounded"
-            :style="{ width: viewportWidth + 'px', height: viewportHeight + 'px' }"
+            class="relative bg-black flex items-center justify-center overflow-hidden rounded max-w-full max-h-[80vh]"
+            @wheel.prevent="onWheelZoom"
           >
             <img
-              ref="modalImg"
               v-if="modalImage"
               :src="modalImage"
-              alt="Full screenshot"
-              class="select-none"
-              :style="imgStyle"
-              draggable="false"
-              @dragstart.prevent
+              class="select-none max-h-[80vh] max-w-full transition-transform"
+              :style="{ transform: `scale(${zoom})` }"
             />
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Upload overlay (loader) -->
-    <div
-      v-if="isUploading"
-      class="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-40"
-    >
+    <!-- Upload overlay -->
+    <div v-if="isUploading" class="fixed inset-0 z-40 flex items-center justify-center bg-black bg-opacity-40">
       <div class="bg-white rounded p-6 flex flex-col items-center gap-4 shadow-lg">
         <div class="loader w-12 h-12"></div>
         <div class="text-lg font-medium">Uploading timesheet and screenshots...</div>
@@ -151,17 +145,15 @@
 
     <!-- Toasts -->
     <div class="fixed bottom-6 right-6 z-50 flex flex-col gap-3">
-      <div
-        v-if="uploadStatus === 'success'"
-        class="bg-green-600 text-white px-4 py-2 rounded shadow"
-      >
-        Upload succeeded.
+      <div v-if="uploadStatus === 'success'" class="bg-green-600 text-white px-4 py-2 rounded shadow flex items-center justify-between gap-4">
+        <div>Upload succeeded.</div>
+        <button @click="dismissToast" class="px-2 py-1 bg-white text-black rounded shadow">Cancel</button>
       </div>
-
       <div v-if="uploadStatus === 'failed'" class="bg-red-600 text-white px-4 py-2 rounded shadow flex items-center gap-3">
         <div>Upload failed: {{ uploadErrorMessage }}</div>
         <div class="ml-3">
           <button @click="retryUpload" class="px-3 py-1 bg-white text-black rounded shadow">Retry</button>
+          <button @click="dismissToast" class="px-3 py-1 bg-white text-black rounded shadow ml-2">Cancel</button>
         </div>
       </div>
     </div>
@@ -169,394 +161,203 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { Play, Square, Coffee, RotateCcw, ChevronLeft } from "lucide-vue-next";
+import { v4 as uuidv4 } from "uuid";
 
 const router = useRouter();
 const route = useRoute();
 
-// state
+// ---------------------- STATE ----------------------
 const activityName = ref("");
-const lastStartedActivity = ref("");
 const isTracking = ref(false);
 const isOnBreak = ref(false);
 const elapsedSeconds = ref(0);
 const screenshots = ref([]);
+const intervals = ref([]);
 let screenshotTimeout = null;
-const interval = ref(null);
-let startTimestamp = null;
-let stopTimestamp = null;
+let timerInterval = null;
+let currentInterval = null;
+const sessionId = ref(null);
 
-// modal + zoom
+// upload states
+const isUploading = ref(false);
+const uploadStatus = ref("idle");
+const uploadErrorMessage = ref("");
+const showTimesheetLink = ref(false);
+
+// modal states
 const modalVisible = ref(false);
 const modalImage = ref(null);
 const zoom = ref(1);
-const offset = ref({ x: 0, y: 0 });
-const dragging = ref(false);
-const dragStart = ref({ x: 0, y: 0 });
-const offsetStart = ref({ x: 0, y: 0 });
-const viewport = ref(null);
-const modalImg = ref(null);
-const viewportWidth = ref(Math.min(window.innerWidth * 0.9, 1400));
-const viewportHeight = ref(Math.min(window.innerHeight * 0.9, 900));
 
+// timesheet url
+const timesheetUrl = ref("");
+
+// ---------------------- COMPUTED ----------------------
 const formattedTime = computed(() => {
-  const minutes = String(Math.floor(elapsedSeconds.value / 60)).padStart(2, "0");
-  const seconds = String(elapsedSeconds.value % 60).padStart(2, "0");
-  return `${minutes}:${seconds}`;
+  const hrs = String(Math.floor(elapsedSeconds.value / 3600)).padStart(2, "0");
+  const mins = String(Math.floor((elapsedSeconds.value % 3600) / 60)).padStart(2, "0");
+  const secs = String(elapsedSeconds.value % 60).padStart(2, "0");
+  return `${hrs}:${mins}:${secs}`;
 });
 
-// upload state & retry
-const isUploading = ref(false);
-const uploadStatus = ref("idle"); // 'idle' | 'uploading' | 'success' | 'failed'
-const uploadErrorMessage = ref("");
-let lastUploadPayload = null;
+// ---------------------- NAVIGATION ----------------------
+function onBack() { router.push("/"); }
 
-// helper: format Date to Frappe datetime "YYYY-MM-DD HH:mm:ss" in local timezone
-function toFrappeDatetime(d) {
-  if (!d) return null;
-  const Y = d.getFullYear();
-  const M = String(d.getMonth() + 1).padStart(2, "0");
-  const D = String(d.getDate()).padStart(2, "0");
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
-}
-
-// ------------ Navigation ------------
-function onBack() {
-  // enforce "only allowed when time is 00:00"
-  if (isUploading.value) return; // extra safety
-  if (elapsedSeconds.value !== 0) {
-    window.alert("Please reset the timer to 00:00 before going back to the dashboard.");
-    return;
-  }
-  router.push("/dashboard");
-}
-
-// ------------ Timer controls ------------
-function toggleTracking() {
-  if (isTracking.value) {
-    stopAndUpload();
-  } else {
-    startTimer();
-  }
-}
-
+// ---------------------- TIMER ----------------------
 function startTimer() {
-  // prevent restarting from stopped time — require reset
   if (elapsedSeconds.value > 0) return;
-
-  // mark start
-  startTimestamp = new Date();
   isTracking.value = true;
   isOnBreak.value = false;
-  interval.value = setInterval(() => {
-    if (!isOnBreak.value) elapsedSeconds.value++;
-  }, 1000);
-
+  sessionId.value = uuidv4();
+  currentInterval = { from: new Date().toISOString(), to: null, completed: false };
+  timerInterval = setInterval(() => { if (!isOnBreak.value) elapsedSeconds.value++; }, 1000);
   scheduleNextScreenshot();
-  // load screenshots (should be empty usually)
-  loadScreenshots();
+}
+
+function endCurrentInterval() {
+  if (!currentInterval) return;
+  currentInterval.to = new Date().toISOString();
+  currentInterval.completed = true;
+  intervals.value.push(currentInterval);
+  currentInterval = null;
 }
 
 function stopTimer() {
+  endCurrentInterval();
   isTracking.value = false;
-  clearInterval(interval.value);
+  clearInterval(timerInterval);
   clearTimeout(screenshotTimeout);
-  stopTimestamp = new Date();
 }
 
-// stop + upload flow
 async function stopAndUpload() {
-  // set stop time and stop capturing further screenshots immediately
-  stopTimestamp = new Date();
-  isTracking.value = false;
-  clearInterval(interval.value);
-  clearTimeout(screenshotTimeout);
-
-  // gather route query params for timesheet/task/project
-  const taskName = route.query.task || route.query.task_name || "";
-  const timesheetName = route.query.timesheet || route.query.timesheet_name || "";
-  const projectName = route.query.project || route.query.project_name || "";
-
-  // prepare payload
+  stopTimer();
+  const completedIntervals = intervals.value.filter(i => i.completed);
   const payload = {
-    timesheet_name: timesheetName,
-    task_name: taskName,
-    project_name: projectName,
+    timesheet_name: route.query.timesheet || "",
+    task_name: route.query.task || "",
+    project_name: route.query.project || "",
     activity_name: activityName.value || "",
-    from_time: toFrappeDatetime(startTimestamp),
-    to_time: toFrappeDatetime(stopTimestamp),
-    screenshots: []
+    intervals: completedIntervals,
+    session_id: sessionId.value,
   };
-
-  // fetch screenshots from main
-  try {
-    const files = await window.api.getScreenshots(); // expects [{ name, fullData, ... }]
-    if (Array.isArray(files)) {
-      for (const f of files) {
-        const name = f.name || f.fileSaved || `screenshot-${Date.now()}.png`;
-        let data = f.fullData || f.filePath || ""; // fullData is expected to be data URL
-        if (!data) continue;
-        const commaIndex = data.indexOf(",");
-        if (commaIndex !== -1) data = data.slice(commaIndex + 1);
-        payload.screenshots.push({ filename: name, data });
-      }
-    }
-  } catch (err) {
-    console.error("Failed to read screenshots before upload:", err);
-    // continue with empty screenshots
-  }
-
-  // store last payload for retry
-  lastUploadPayload = payload;
-
-  // perform upload
-  await performUpload(payload);
+  await finalizeUpload(payload);
 }
 
-// core upload function (handles state)
-async function performUpload(payload) {
+async function finalizeUpload(payload) {
   isUploading.value = true;
   uploadStatus.value = "uploading";
-  uploadErrorMessage.value = "";
-
+  showTimesheetLink.value = false;
   try {
-    // Frappe RPC handler expects a named parameter `data`.
-    // Wrap our JSON payload into an URL-encoded form field named `data`.
     const body = new URLSearchParams();
     body.append("data", JSON.stringify(payload));
+    const response = await window.api.fetchAPI("/api/method/time_tracker.time_tracker.api.finalize_timesheet_with_screenshots", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      data: body.toString(),
+    });
 
-    const res = await window.api.fetchAPI(
-      "/api/method/time_tracker.time_tracker.api.save_timesheet_with_screenshots",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        // ipcMain fetch-api forwards this to axios, which will send the body string
-        data: body.toString(),
-      }
-    );
+  // Frappe usually wraps response inside "message"
+    const responseData = response?.message || response;
 
-    // Consider response a success if we got here without throwing
+    timesheetUrl.value = responseData?.timesheet_url || "";
     uploadStatus.value = "success";
-
-    // clear screenshots on success (best-effort)
-    try {
-      if (window.api.clearScreenshots) {
-        await window.api.clearScreenshots();
-      }
-    } catch (err) {
-      console.error("Failed to clear screenshots after upload:", err);
-    } finally {
-      screenshots.value = [];
-    }
-
-    // mark upload finished
     isUploading.value = false;
-
-    // briefly show success then reset status
-    setTimeout(() => {
-      uploadStatus.value = "idle";
-    }, 2500);
-
-    return res;
+    showTimesheetLink.value = !!timesheetUrl.value; // show button if URL exists
   } catch (err) {
-    // extract a friendly message from various possible error shapes
-    let message = "";
-    if (!err) message = "Unknown error";
-    else if (typeof err === "string") message = err;
-    else if (err.exception) message = err.exception;
-    else if (err.message) message = err.message;
-    else if (err.error) message = err.error;
-    else message = JSON.stringify(err);
-
-    console.error("Upload failed:", err);
     uploadStatus.value = "failed";
-    uploadErrorMessage.value = message;
+    uploadErrorMessage.value = err?.message || String(err);
     isUploading.value = false;
-
-    // keep lastUploadPayload for retry (handled elsewhere)
-    throw err; // rethrow if caller wants to handle
   }
 }
 
-// retry uses lastUploadPayload
-async function retryUpload() {
-  if (!lastUploadPayload) return;
-  await performUpload(lastUploadPayload);
-}
-
-function toggleBreak() {
-  if (!isTracking.value) return;
-  isOnBreak.value = !isOnBreak.value;
-  if (!isOnBreak.value) scheduleNextScreenshot();
-  else clearTimeout(screenshotTimeout);
-}
-
-function resetTimer() {
+function resetTimer(cleanupSession = true) {
   if (isTracking.value || isUploading.value) return;
-  clearInterval(interval.value);
+  clearInterval(timerInterval);
   clearTimeout(screenshotTimeout);
+
+  if (cleanupSession && sessionId.value) {
+    window.api.fetchAPI("/api/method/time_tracker.time_tracker.api.cleanup_session", {
+      method: "POST",
+      data: { session_id: sessionId.value },
+    }).catch(err => console.error("Cleanup failed:", err));
+  }
+
   elapsedSeconds.value = 0;
   isOnBreak.value = false;
-  startTimestamp = null;
-  stopTimestamp = null;
+  intervals.value = [];
+  screenshots.value = [];
+  showTimesheetLink.value = false;
+  currentInterval = null;
+  sessionId.value = null;
 }
 
-// ------------ Screenshot functions ------------
-async function takeScreenshot() {
-  try {
-    await window.api.takeScreenshot();
-    await loadScreenshots();
-  } catch (err) {
-    console.error("Screenshot failed:", err);
+function resetAndCleanup() { resetTimer(true); }
+
+// ---------------------- BREAK ----------------------
+function toggleBreak() {
+  if (!isTracking.value) return;
+  if (!isOnBreak.value) {
+    endCurrentInterval();
+    isOnBreak.value = true;
+  } else {
+    currentInterval = { from: new Date().toISOString(), to: null, completed: false };
+    isOnBreak.value = false;
   }
 }
 
-async function loadScreenshots() {
-  try {
-    const files = await window.api.getScreenshots();
-    screenshots.value = files || [];
-  } catch (err) {
-    console.error("Failed to load screenshots:", err);
-  }
-}
-
-// schedule random 8-12 minutes
+// ---------------------- SCREENSHOTS ----------------------
 function scheduleNextScreenshot() {
-  if (!isTracking.value || isOnBreak.value) return;
-  const min =  60 * 1000;
-  const max = 1 * 60 * 1000;
-  const randomDelay = Math.floor(Math.random() * (max - min + 1)) + min;
+  const delay = Math.floor(Math.random() * (60 - 10 + 1) + 10) * 1000;
   screenshotTimeout = setTimeout(async () => {
-    if (isTracking.value && !isOnBreak.value) {
-      await takeScreenshot();
-      scheduleNextScreenshot();
-    }
-  }, randomDelay);
+    await takeScreenshot();
+    if (isTracking.value) scheduleNextScreenshot();
+  }, delay);
 }
 
-// ------------ Modal + zoom/pan ------------
-function openModal(fullBase64) {
-  modalImage.value = fullBase64;
-  zoom.value = 1;
-  offset.value = { x: 0, y: 0 };
-  modalVisible.value = true;
-  viewportWidth.value = Math.min(window.innerWidth * 0.9, 1400);
-  viewportHeight.value = Math.min(window.innerHeight * 0.9, 900);
-}
-function closeModal() {
-  modalVisible.value = false;
-  modalImage.value = null;
-  zoom.value = 1;
-  offset.value = { x: 0, y: 0 };
-}
-function zoomIn() { setZoom(zoom.value * 1.2); }
-function zoomOut() { setZoom(zoom.value / 1.2); }
-function resetView() { zoom.value = 1; offset.value = { x: 0, y: 0 }; }
-function fitToScreen() {
-  if (!modalImg.value) return;
-  const img = modalImg.value;
-  const naturalW = img.naturalWidth;
-  const naturalH = img.naturalHeight;
-  const scaleW = viewportWidth.value / naturalW;
-  const scaleH = viewportHeight.value / naturalH;
-  const fit = Math.min(scaleW, scaleH, 1);
-  setZoom(fit);
-  offset.value = { x: 0, y: 0 };
-}
-function setZoom(v) { zoom.value = Math.max(0.1, Math.min(v, 8)); }
-
-function onPointerDown(e) {
-  if (!modalVisible.value) return;
-  dragging.value = true;
-  dragStart.value = { x: e.clientX, y: e.clientY };
-  offsetStart.value = { ...offset.value };
-  (e.target).setPointerCapture?.(e.pointerId);
-}
-function onPointerMove(e) {
-  if (!dragging.value) return;
-  const dx = e.clientX - dragStart.value.x;
-  const dy = e.clientY - dragStart.value.y;
-  offset.value = { x: offsetStart.value.x + dx, y: offsetStart.value.y + dy };
-}
-function onPointerUp(e) {
-  dragging.value = false;
-  try { e.target.releasePointerCapture?.(e.pointerId); } catch {}
-}
-function onWheelZoom(e) {
-  const delta = -e.deltaY;
-  const factor = delta > 0 ? 1.12 : 1 / 1.12;
-  const oldZoom = zoom.value;
-  const newZoom = Math.max(0.1, Math.min(oldZoom * factor, 8));
-  if (modalImg.value && viewport.value) {
-    const rect = viewport.value.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const prevX = (cx - rect.width / 2 - offset.value.x) / oldZoom;
-    const prevY = (cy - rect.height / 2 - offset.value.y) / oldZoom;
-    const newOffsetX = cx - rect.width / 2 - prevX * newZoom;
-    const newOffsetY = cy - rect.height / 2 - prevY * newZoom;
-    offset.value = { x: newOffsetX, y: newOffsetY };
-  }
-  zoom.value = newZoom;
-}
-
-const imgStyle = computed(() => ({
-  transform: `translate(${offset.value.x}px, ${offset.value.y}px) scale(${zoom.value})`,
-  transformOrigin: "center center",
-  transition: dragging.value ? "none" : "transform 120ms ease-out",
-  cursor: dragging.value ? "grabbing" : "grab",
-  maxWidth: "none",
-  maxHeight: "none",
-}));
-
-function onKeydown(e) {
-  if (e.key === "Escape") closeModal();
-  if (e.key === "+" || e.key === "=") zoomIn();
-  if (e.key === "-") zoomOut();
-}
-
-// On mount: always clear screenshots so Timer page starts fresh
-onMounted(async () => {
+async function takeScreenshot() {
+  if (!isTracking.value || isOnBreak.value) return;
   try {
-    if (window.api?.clearScreenshots) {
-      await window.api.clearScreenshots();
-    }
-  } catch (err) {
-    console.error('Failed to clear screenshots on mount:', err);
-  } finally {
-    screenshots.value = [];
-  }
+    const file = await window.api.takeScreenshot();
+    if (!file) return;
+    let data = file.fullData || file.filePath || "";
+    if (!data) return;
+    const commaIndex = data.indexOf(",");
+    if (commaIndex !== -1) data = data.slice(commaIndex + 1);
+    const filename = `screenshot_${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+    await window.api.fetchAPI("/api/method/time_tracker.time_tracker.api.upload_screenshot", {
+      method: "POST",
+      data: { file_name: filename, file_data: data, session_id: sessionId.value },
+    });
+    screenshots.value.push({
+      name: filename,
+      thumbnail: file.thumbnail || file.fullData,
+      fullData: file.fullData,
+    });
+  } catch (err) { console.error("Screenshot failed:", err); }
+}
 
-  window.addEventListener("keydown", onKeydown);
-});
+// ---------------------- MODAL ----------------------
+function openModal(img) { modalImage.value = img; modalVisible.value = true; }
+function closeModal() { modalVisible.value = false; modalImage.value = null; zoom.value = 1; }
+function zoomIn() { zoom.value *= 1.2; }
+function zoomOut() { zoom.value /= 1.2; }
+function fitToScreen() { zoom.value = 1; }
+function resetView() { zoom.value = 1; }
+function onWheelZoom(e) {
+  zoom.value *= e.deltaY < 0 ? 1.1 : 0.9;
+}
 
-onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onKeydown);
-});
+// ---------------------- CONTROLS ----------------------
+function toggleTracking() { if (isTracking.value) stopAndUpload(); else startTimer(); }
+function retryUpload() { stopAndUpload(); }
+function dismissToast() { uploadStatus.value = "idle"; }
+
+// ---------------------- NAVIGATION TO TIMESHEET ----------------------
+function goToTimesheet() {
+  if (!timesheetUrl.value) return;
+  window.open(timesheetUrl.value, "_blank");
+}
 </script>
-
-<style scoped>
-img[draggable="false"] {
-  -webkit-user-drag: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* loader */
-.loader {
-  border: 4px solid rgba(0,0,0,0.08);
-  border-left-color: #111827;
-  border-radius: 9999px;
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-</style>
