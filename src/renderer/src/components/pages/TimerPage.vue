@@ -27,11 +27,16 @@
         <label class="block mb-2 font-medium">Activity Name</label>
         <input
           v-model="activityName"
+          list="activity-options"
           type="text"
           :disabled="isTracking || isUploading"
           class="w-full border rounded p-2 focus:outline-none focus:ring-2 focus:ring-black disabled:bg-gray-200"
-          placeholder="Enter activity name"
+          placeholder="Enter or select activity"
+          @focus="fetchActivities"
         />
+        <datalist id="activity-options">
+          <option v-for="act in activities" :key="act" :value="act" />
+        </datalist>
       </div>
 
       <!-- Timer Display -->
@@ -161,7 +166,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { Play, Square, Coffee, RotateCcw, ChevronLeft } from "lucide-vue-next";
 import { v4 as uuidv4 } from "uuid";
@@ -171,6 +176,7 @@ const route = useRoute();
 
 // ---------------------- STATE ----------------------
 const activityName = ref("");
+const activities = ref([]); // <-- newly added
 const isTracking = ref(false);
 const isOnBreak = ref(false);
 const elapsedSeconds = ref(0);
@@ -205,6 +211,30 @@ const formattedTime = computed(() => {
 
 // ---------------------- NAVIGATION ----------------------
 function onBack() { router.push("/"); }
+
+// ---------------------- ACTIVITY FETCHER (NEW) ----------------------
+async function fetchActivities() {
+  // avoid refetching if already loaded
+  if (activities.value.length) return;
+  try {
+    // Using the REST resource endpoint you confirmed
+    const res = await window.api.fetchAPI("/api/resource/Activity%20Type?limit_page_length=200");
+    // response shape: { data: [ { name: "Planning" }, ... ] }
+    const items = res?.data || res?.message || res || [];
+    // safely map to names (strings). Deduplicate.
+    const names = Array.isArray(items)
+      ? items.map(i => (typeof i === "string" ? i : i?.name)).filter(Boolean)
+      : [];
+    activities.value = Array.from(new Set(names));
+  } catch (err) {
+    console.error("Failed to fetch activities:", err);
+  }
+}
+
+// prefetch activities once on mount so the datalist is ready
+onMounted(() => {
+  fetchActivities();
+});
 
 // ---------------------- TIMER ----------------------
 function startTimer() {
@@ -259,7 +289,7 @@ async function finalizeUpload(payload) {
       data: body.toString(),
     });
 
-  // Frappe usually wraps response inside "message"
+    // Frappe usually wraps response inside "message"
     const responseData = response?.message || response;
 
     timesheetUrl.value = responseData?.timesheet_url || "";
