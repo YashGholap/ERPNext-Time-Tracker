@@ -1,17 +1,27 @@
 # 🕒 ERPNext Time Tracker Client
 
 <p align="center">
-  <img src="https://img.shields.io/badge/ERPNext-Time%20Automation-blue?style=flat-square" alt="ERPNext Time Automation">
-  <img src="https://img.shields.io/badge/Platform-Electron%20%7C%20Vue.js-42b883?style=flat-square" alt="Built with Electron and Vue.js">
+  <img src="https://img.shields.io/badge/ERPNext-Time%20Automation-black?style=flat-square&logo=erpnext&logoColor=white" alt="ERPNext Time Automation">
+  <img src="https://img.shields.io/badge/Platform-Electron%20%7C%20Vue.js-black?style=flat-square&logo=electron&logoColor=white" alt="Built with Electron and Vue.js">
 </p>
 
 ## Introduction
 
-The **ERPNext Time Tracker Client** is a robust desktop application designed to eliminate manual time entry and streamline the timesheet process within your ERPNext instance.
+The **ERPNext Time Tracker Client** is a robust, cross-platform desktop application designed to eliminate manual time entry and streamline the timesheet process within your ERPNext instance.
 
 This client runs locally on your desktop, acting as a direct bridge between your focused work activity and your ERPNext Timesheets. It's built for professionals who need accurate, verifiable time logs without the distraction of constantly managing timers in a browser.
 
 **Say goodbye to manual time entry and tedious data transcription!**
+
+---
+
+## ⚠️ Critical Dependency
+
+**This desktop client requires a server-side component to function.**
+
+You must install the corresponding Frappe application on your ERPNext site:
+
+* **Server App:** [**Time Tracker Frappe App**](https://github.com/YashGholap/Time_tracker_frappe)
 
 ---
 
@@ -44,9 +54,10 @@ The Time Tracker Client is engineered for accuracy, efficiency, and accountabili
 
 **This is an initial release and is currently only built and tested for the Windows operating system.** Support for macOS and Linux is planned for future releases.
 
-1.  **Go to the [Releases Page](https://github.com/YashGholap/ERPNext-Time-Tracker/releases):** Click the **Releases** tab on this GitHub repository.
-2.  **Download the Installer:** Find the latest release and download the `.exe` installer file (e.g., `ERPNext-Time-Tracker-Setup-v1.0.0.exe`).
-3.  **Run the Installer:** Execute the downloaded file and follow the on-screen instructions to install the application.
+1.  **Install the Server App:** Ensure the [**Time Tracker Frappe App**](https://github.com/YashGholap/Time_tracker_frappe) is installed and configured on your ERPNext server.
+2.  **Go to the [Releases Page](https://github.com/YashGholap/ERPNext-Time-Tracker/releases):** Click the **Releases** tab on this GitHub repository.
+3.  **Download the Installer:** Find the latest release and download the `.exe` installer file (e.g., `ERPNext-Time-Tracker-Setup-v1.0.0.exe`).
+4.  **Run the Installer:** Execute the downloaded file and follow the on-screen instructions to install the application.
 
 ---
 
@@ -76,6 +87,7 @@ The Time Tracker Client is engineered for accuracy, efficiency, and accountabili
 
 * [Node.js](https://nodejs.org/en/) (LTS version recommended)
 * npm (installed with Node.js)
+* The [**Time Tracker Frappe App**](https://github.com/YashGholap/Time_tracker_frappe) installed on a local ERPNext development bench for API testing.
 
 ### Setup Instructions
 
