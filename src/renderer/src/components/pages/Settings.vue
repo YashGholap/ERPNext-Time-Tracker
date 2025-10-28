@@ -2,11 +2,11 @@
 import { ref, onMounted } from 'vue'
 import { Clock } from 'lucide-vue-next'
 import { useRouter } from "vue-router"
+import { showLoader, hideLoader } from '../../stores/loader'
 
 const serverUrl = ref('')
 const apiKey = ref('')
 const apiSecret = ref('')
-const loading = ref(false)
 const error = ref(null)
 const success = ref(null)
 
@@ -31,16 +31,19 @@ const saveSettings = async () => {
     return
   }
 
-  loading.value = true
+
+  showLoader()
   try {
     await window.api.saveCredentials(serverUrl.value, apiKey.value, apiSecret.value)
     success.value = '✅ Settings saved'
-    router.push('/dashboard')
+    setTimeout(()=>{
+      hideLoader()
+      router.push('/dashboard')
+    }, 1500)
   } catch (err) {
+    hideLoader()
     error.value = err.message || 'Failed to save settings'
-  } finally {
-    loading.value = false
-  }
+  } 
 }
 </script>
 

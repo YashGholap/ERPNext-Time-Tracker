@@ -1,5 +1,6 @@
 {
-  "name": "desktop-client",
+  "name": "erpnext-time-tracker",
+  "productName": "ERPNext Time Tracker",
   "version": "1.0.0",
   "description": "An Electron application with Vue",
   "main": "./out/main/index.js",
@@ -42,5 +43,39 @@
     "vite": "^7.0.5",
     "vue": "^3.5.17",
     "vue-eslint-parser": "^10.2.0"
+  },
+  "build": {
+  "appId": "com.tracktime.desktop",
+  "productName": "ERPNext Time Tracker",
+  "files": [
+    "out/**/*",
+    "dist/**/*",
+    "renderer/**/*",
+    "resources/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "directories": {
+    "buildResources": "resources",
+    "output": "dist"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "resources/Track-Time-logo.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
   }
+}
 }

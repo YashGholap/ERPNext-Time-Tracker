@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { UserRoundCog } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
+import { showLoader, hideLoader } from '../../stores/loader'
 
 const router = useRouter()
 const userName = ref('User')
@@ -28,35 +29,30 @@ const extractArrayFromResponse = (res) => {
 }
 
 const extractUserFromResponse = (res) => {
-  if (!res) return 'User'
-  if (typeof res === 'string') return res
-  if (typeof res.message === 'string') return res.message
-  if (Array.isArray(res.message) && res.message.length) {
-    const first = res.message[0]
-    if (typeof first === 'string') return first
-    if (first?.full_name) return first.full_name
-    if (first?.name) return first.name
-    return JSON.stringify(first)
+  // Assuming the new API returns { "message": "John" } or similar
+  if (res?.message && typeof res.message === 'string' && res.message.length > 0) {
+    return res.message
   }
-  if (typeof res.data === 'string') return res.data
-  if (Array.isArray(res.data) && res.data.length) {
-    const first = res.data[0]
-    if (typeof first === 'string') return first
-    if (first?.full_name) return first.full_name
-    if (first?.name) return first.name
-    return JSON.stringify(first)
+  // Fallback in case of an object { "data": { "first_name": "John" } }
+  if (res?.data?.first_name) {
+    return res.data.first_name
   }
+  // The ultimate fallback
   return 'User'
 }
 // --- end helpers ---
 
 // Fetch logged-in username
 onMounted(async () => {
+  showLoader()
   try {
-    const user = await window.api.fetchAPI('/api/method/frappe.auth.get_logged_user')
-    userName.value = extractUserFromResponse(user) || 'User'
+    const user = await window.api.fetchAPI('/api/method/time_tracker.time_tracker.api.get_user_first_name')
+    userName.value = extractUserFromResponse(user)
   } catch (err) {
     console.error('Failed to fetch logged-in user:', err)
+    userName.value = 'User'
+  }finally {
+    hideLoader()
   }
 })
 
@@ -128,15 +124,16 @@ const canTrack = computed(() => {
 // Handle Start Timer (clear screenshots then navigate)
 const goToTimerPage = async () => {
   if (!canTrack.value) return
+  showLoader()
   try {
     // Clear screenshots folder via main process so TimerPage starts fresh
     if (window.api?.clearScreenshots) {
       await window.api.clearScreenshots()
     }
-  } catch (err) {
-    console.error('Failed to clear screenshots before navigation:', err)
-  } finally {
-    router.push({
+
+    setTimeout(()=>{
+      hideLoader()
+      router.push({
       path: '/timer',
       query:{
           project: selectedProject.value,
@@ -144,6 +141,10 @@ const goToTimerPage = async () => {
           timesheet: selectedTimesheet.value
       }
     });
+    }, 1200)
+  } catch (err) {
+    console.error('Failed to clear screenshots before navigation:', err)
+    hideLoader()
   }
 }
 </script>

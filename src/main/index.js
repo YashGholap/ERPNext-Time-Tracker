@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, desktopCapturer, nativeImage, screen } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
+import icon from '../../resources/Track-Time-logo.ico?asset'
 
 import fs from 'fs'
 import path from 'path'
@@ -14,17 +14,19 @@ const store = new Store()
 function createWindow() {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 420,
+    height: 600,
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
+    title:"ERPNext Time Tracker",
+    icon: icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
   })
 
+  // ...(process.platform === 'linux' ? { icon } : {}),
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
