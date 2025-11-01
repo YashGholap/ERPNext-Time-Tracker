@@ -482,7 +482,7 @@ function toggleBreak() {
 
 // ---------------------- SCREENSHOTS ----------------------
 function scheduleNextScreenshot() {
-  const delay = Math.floor(Math.random() * (60 - 10 + 1) + 10) * 1000;
+  const delay = Math.floor(Math.random() * (10 - 1 + 1) + 1) * 60 * 1000;
   screenshotTimeout = setTimeout(async () => {
     await takeScreenshot();
     if (isTracking.value) scheduleNextScreenshot();
